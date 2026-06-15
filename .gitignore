@@ -1,1 +1,4 @@
 target/
+# Логи работы компонентов DE
+*.log
+compositor.log
