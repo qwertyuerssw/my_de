@@ -7,5 +7,6 @@ members = [
     "de-panel",
     "modules/mod-clock",
     "modules/mod-sysinfo",
-    "modules/mod-volume"
+    "modules/mod-volume",
+    "de-sdk"
 ]

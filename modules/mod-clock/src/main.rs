@@ -1,48 +1,56 @@
-use std::io::Write;
-use std::os::unix::net::UnixStream;
-use std::thread;
-use std::time::Duration;
 use chrono::Local;
-use de_ipc::{IpcMessage, ClientType}; // Убрали импорт ModuleId
+use de_sdk::{ModuleClient, ModuleEvent};
+use de_ipc::ProcessAction;
+use std::time::Duration;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("[Clock] Starting clock module...");
-    
-    let socket_path = "/tmp/my-de-ipc.sock";
-    let mut socket = UnixStream::connect(socket_path)?;
-    println!("[Clock] Connected to IPC socket.");
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("[Clock] Starting clock module with de-sdk...");
 
-    // 1. Регистрируемся в композиторе как модуль часов (передаем строковый ID)
-    let reg_msg = IpcMessage::Register {
-        client_type: ClientType::Module("clock".to_string()),
-    };
-    send_ipc(&mut socket, &reg_msg)?;
+    // 1. Инициализируем и запускаем клиент модуля
+    let client = ModuleClient::new("clock");
+    let (handle, mut rx_events) = client.start().await?;
 
-    // 2. Бесконечный цикл отправки времени каждую секунду
-    loop {
-        let current_time = Local::now().format("%H:%M:%S").to_string();
-        let formatted_data = format!("🕒 {}", current_time);
+    println!("[Clock] Connected to SDK background engine.");
 
-        let update_msg = IpcMessage::PublishUpdate {
-            module: "clock".to_string(), // Используем строковый ID "clock"
-            data: formatted_data,
-        };
+    // 2. Запускаем параллельную асинхронную задачу для ежесекундного обновления времени
+    let handle_clone = handle.clone();
+    tokio::spawn(async move {
+        loop {
+            let current_time = Local::now().format("%H:%M:%S").to_string();
+            let formatted_data = format!("🕒 {}", current_time);
 
-        if let Err(e) = send_ipc(&mut socket, &update_msg) {
-            eprintln!("[Clock] Failed to send update: {:?}", e);
-            break;
+            if let Err(e) = handle_clone.publish_update(formatted_data) {
+                eprintln!("[Clock] Failed to send update: {:?}", e);
+            }
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
+    });
 
-        thread::sleep(Duration::from_secs(1));
+    // 3. Главный поток превращается в реактивную петлю обработки событий
+    while let Some(event) = rx_events.recv().await {
+        match event {
+            ModuleEvent::Action(ProcessAction::Stop) => {
+                println!("[Clock] Received Stop command. Exiting gracefully...");
+                break; // Завершает цикл и завершает работу модуля чисто
+            }
+            ModuleEvent::Action(ProcessAction::Restart) => {
+                println!("[Clock] Received Restart command. Reinitializing...");
+                // Здесь может быть логика перезагрузки конфигурации
+            }
+            ModuleEvent::RefreshRequest => {
+                println!("[Clock] Refresh requested by composer/panel.");
+                let current_time = Local::now().format("%H:%M:%S").to_string();
+                let _ = handle.publish_update(format!("🕒 {}", current_time));
+            }
+            _ => {
+                // Игнорируем команды вроде Start (так как мы уже запущены) 
+                // и любые другие новые типы событий, которые могут появиться в SDK
+            }
+        }
     }
 
-    Ok(())
-}
-
-fn send_ipc(socket: &mut UnixStream, msg: &IpcMessage) -> Result<(), Box<dyn std::error::Error>> {
-    let mut serialized = serde_json::to_string(msg)?;
-    serialized.push('\n');
-    socket.write_all(serialized.as_bytes())?;
-    socket.flush()?;
+    println!("[Clock] Stopped.");
     Ok(())
 }
