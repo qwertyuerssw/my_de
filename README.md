@@ -244,6 +244,8 @@ match msg {
 Запустите полную сборку проекта и проверьте интеграцию:
 
 cargo build && ./run-de.sh
+```
+
 
 
 # TODO: Развитие Desktop Environment (my_de)
