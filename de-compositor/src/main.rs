@@ -1,14 +1,11 @@
-mod state;
 mod handlers;
+mod ipc;
+pub mod state; // Модуль сделан pub для беспрепятственного разрешения зависимостей
 mod winit;
-mod ipc; // <--- Подключили модуль ipc
 
 use smithay::{
     backend::renderer::gles::GlesRenderer,
-    reexports::{
-        calloop::EventLoop,
-        wayland_server::Display,
-    },
+    reexports::{calloop::EventLoop, wayland_server::Display},
 };
 use state::Smallvil;
 
@@ -25,7 +22,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (backend, winit_event_loop) = smithay::backend::winit::init::<GlesRenderer>()?;
     winit::init_winit(&mut state, backend, winit_event_loop)?;
 
-    tracing::info!("Wayland compositor and IPC server initialized successfully. Running event loop...");
+    tracing::info!(
+        "Wayland compositor and IPC server initialized successfully. Running event loop..."
+    );
 
     while state.running {
         event_loop.dispatch(std::time::Duration::from_millis(16), &mut state)?;

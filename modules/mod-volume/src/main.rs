@@ -1,5 +1,5 @@
-use de_sdk::{ModuleClient, ModuleEvent};
 use de_ipc::ProcessAction;
+use de_sdk::{ModuleClient, ModuleEvent};
 use std::time::Duration;
 
 #[tokio::main]

@@ -1,183 +1,212 @@
+use de_ipc::{IpcMessage, ProcessAction};
+use gtk4::glib;
+use gtk4::prelude::*;
+use gtk4::{Align, Application, ApplicationWindow, Box as GtkBox, Button, Label, Orientation};
+use gtk4_layer_shell::{Edge, Layer, LayerShell};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use eframe::egui;
-use de_ipc::{IpcMessage, ModuleConfig, ProcessAction};
+use std::rc::Rc;
+use std::time::Duration;
 
-/// Вспомогательная структура для отслеживания состояния конкретного модуля на панели
-struct ModuleState {
-    config: ModuleConfig,
+struct ModuleWidgets {
+    label: Label,
+    button: Button,
     is_running: bool,
-    data: String,
 }
 
-struct PanelApp {
-    // Каналы для безопасного общения потока GUI с сетевыми потоками
-    ipc_tx: std::sync::mpsc::Sender<IpcMessage>,
-    ipc_rx: std::sync::mpsc::Receiver<IpcMessage>,
+fn main() -> glib::ExitCode {
+    let app = Application::builder()
+        .application_id("org.myde.panel")
+        .build();
+
+    app.connect_activate(build_ui);
+    app.run()
+}
+
+fn build_ui(app: &Application) {
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title("MyDE Panel")
+        .build();
+
+    // 1. Инициализация Layer Shell
+    window.init_layer_shell();
+    window.set_layer(Layer::Top);
+    window.auto_exclusive_zone_enable();
     
-    // Динамический список всех загруженных модулей
-    modules: Vec<ModuleState>,
-}
+    window.set_anchor(Edge::Top, true);
+    window.set_anchor(Edge::Left, true);
+    window.set_anchor(Edge::Right, true);
 
-impl PanelApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // 1. Подключаемся к нашему центральному сокету композитора
-        let socket_path = "/tmp/my-de-ipc.sock";
-        let stream = UnixStream::connect(socket_path).expect("Failed to connect to central IPC socket");
-        
-        // Клонируем поток для отправки сообщений наружу
-        let mut writer_stream = stream.try_clone().expect("Failed to clone socket stream");
-        
-        // 2. Регистрируем это окно как Панель
-        let reg_msg = IpcMessage::Register {
-            client_type: de_ipc::ClientType::Panel,
-        };
-        let mut serialized = serde_json::to_string(&reg_msg).unwrap();
-        serialized.push('\n');
-        let _ = writer_stream.write_all(serialized.as_bytes());
-        let _ = writer_stream.flush();
-        
-        // 3. Настраиваем канал для входящих сетевых сообщений
-        let (tx, rx) = std::sync::mpsc::channel();
-        
-        // Запускаем асинхронный поток чтения
-        let read_stream = stream;
-        let ctx_clone = cc.egui_ctx.clone();
-        std::thread::spawn(move || {
-            let reader = BufReader::new(read_stream);
-            for line in reader.lines() {
-                if let Ok(content) = line {
-                    if let Ok(msg) = serde_json::from_str::<IpcMessage>(&content) {
-                        let _ = tx.send(msg);
-                        // Вызываем принудительную перерисовку GUI, как только получили данные
-                        ctx_clone.request_repaint();
-                    }
-                }
-            }
-        });
-        
-        // 4. Настраиваем канал для исходящих команд управления процессом
-        let (gui_tx, gui_rx) = std::sync::mpsc::channel::<IpcMessage>();
-        std::thread::spawn(move || {
-            while let Ok(msg) = gui_rx.recv() {
-                if let Ok(mut serialized) = serde_json::to_string(&msg) {
-                    serialized.push('\n');
-                    if writer_stream.write_all(serialized.as_bytes()).is_err() {
-                        break;
-                    }
-                    let _ = writer_stream.flush();
-                }
-            }
-        });
-        
-        // Сразу после подключения запрашиваем список модулей и их статусы у de-manager
-        let _ = gui_tx.send(IpcMessage::QueryStatus);
+    // 2. Построение макета UI
+    let main_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(15)
+        .margin_top(5)
+        .margin_bottom(5)
+        .margin_start(15)
+        .margin_end(15)
+        .build();
 
-        Self {
-            ipc_tx: gui_tx,
-            ipc_rx: rx,
-            modules: Vec::new(),
+    let title_label = Label::builder()
+        .label("🌌 MyDE")
+        .build();
+    main_box.append(&title_label);
+
+    let data_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(15)
+        .hexpand(true)
+        .build();
+    main_box.append(&data_box);
+
+    let controls_box = GtkBox::builder()
+        .orientation(Orientation::Horizontal)
+        .spacing(5)
+        .halign(Align::End)
+        .build();
+    main_box.append(&controls_box);
+
+    window.set_child(Some(&main_box));
+
+    // 3. Подключение к IPC-сокету
+    let socket_path = "/tmp/my-de-ipc.sock";
+    let mut stream_opt = None;
+
+    for attempt in 1..=10 {
+        match UnixStream::connect(socket_path) {
+            Ok(s) => {
+                println!("[Panel] Connected to IPC socket (attempt {}).", attempt);
+                stream_opt = Some(s);
+                break;
+            }
+            Err(e) => {
+                println!("[Panel] IPC connection failed: {}. Retrying...", e);
+                std::thread::sleep(Duration::from_millis(500));
+            }
         }
     }
-}
 
-impl eframe::App for PanelApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Вычитываем все накопившиеся сетевые сообщения
-        while let Ok(msg) = self.ipc_rx.try_recv() {
+    let stream = stream_opt.expect("CRITICAL: Failed to connect to IPC socket.");
+    let mut writer_stream = stream.try_clone().expect("Failed to clone stream");
+
+    let reg_msg = IpcMessage::Register {
+        client_type: de_ipc::ClientType::Panel,
+    };
+    let mut serialized = serde_json::to_string(&reg_msg).unwrap();
+    serialized.push('\n');
+    let _ = writer_stream.write_all(serialized.as_bytes());
+    let _ = writer_stream.flush();
+
+    // 4. Современные каналы связи: async_channel -> GTK Main Loop
+    let (tx_incoming, rx_incoming) = async_channel::unbounded::<IpcMessage>();
+    let (tx_outgoing, rx_outgoing) = std::sync::mpsc::channel::<IpcMessage>();
+
+    // Фоновый поток: Чтение из сокета -> Отправка в канал UI
+    let read_stream = stream;
+    std::thread::spawn(move || {
+        let reader = BufReader::new(read_stream);
+        for line in reader.lines() {
+            if let Ok(content) = line {
+                if let Ok(msg) = serde_json::from_str::<IpcMessage>(&content) {
+                    // Используем send_blocking, так как мы находимся в синхронном потоке
+                    let _ = tx_incoming.send_blocking(msg);
+                }
+            }
+        }
+    });
+
+    // Фоновый поток: Чтение из UI -> Отправка в сокет
+    std::thread::spawn(move || {
+        while let Ok(msg) = rx_outgoing.recv() {
+            if let Ok(mut serialized) = serde_json::to_string(&msg) {
+                serialized.push('\n');
+                if writer_stream.write_all(serialized.as_bytes()).is_err() {
+                    break;
+                }
+                let _ = writer_stream.flush();
+            }
+        }
+    });
+
+    let _ = tx_outgoing.send(IpcMessage::QueryStatus);
+
+    let widgets_map: Rc<RefCell<HashMap<String, ModuleWidgets>>> = Rc::new(RefCell::new(HashMap::new()));
+
+    // Клонируем переменные для перемещения в асинхронный блок
+    let data_box_clone = data_box.clone();
+    let controls_box_clone = controls_box.clone();
+    let tx_out = tx_outgoing.clone();
+
+    // 5. Асинхронный локальный цикл внутри главного потока GTK
+    glib::MainContext::default().spawn_local(async move {
+        // Ожидаем новые сообщения асинхронно, не блокируя UI!
+        while let Ok(msg) = rx_incoming.recv().await {
+            let mut map = widgets_map.borrow_mut();
+
             match msg {
                 IpcMessage::ModulesList { modules } => {
-                    // Инициализируем наш динамический список модулей при первом запросе
-                    self.modules = modules
-                        .into_iter()
-                        .map(|config| ModuleState {
-                            config,
-                            is_running: false,
-                            data: "Waiting data...".to_string(),
-                        })
-                        .collect();
+                    for config in modules {
+                        if !map.contains_key(&config.uuid) {
+                            let label = Label::builder()
+                                .label(format!("{}: Off", config.name))
+                                .build();
+                            data_box_clone.append(&label);
+
+                            let button = Button::builder()
+                                .label(format!("Start {}", config.name)) // Используем name для красивой кнопки
+                                .build();
+                            
+                            let tx_out_inner = tx_out.clone();
+                            let mod_uuid = config.uuid.clone(); // <--- Изменено на uuid
+                            
+                            button.connect_clicked(move |b| {
+                                let action = if b.label().unwrap_or_default().starts_with("Stop") {
+                                    ProcessAction::Stop
+                                } else {
+                                    ProcessAction::Start
+                                };
+                                let _ = tx_out_inner.send(IpcMessage::ControlModule {
+                                    module: mod_uuid.clone(), // <--- Изменено
+                                    action,
+                                });
+                            });
+
+                            controls_box_clone.append(&button);
+
+                            map.insert(config.uuid.clone(), ModuleWidgets { // <--- Изменено на uuid
+                                label,
+                                button,
+                                is_running: false,
+                            });
+                        }
+                    }
                 }
                 IpcMessage::ModuleStatus { module, is_running } => {
-                    if let Some(m) = self.modules.iter_mut().find(|m| m.config.id == module) {
-                        m.is_running = is_running;
+                    if let Some(w) = map.get_mut(&module) {
+                        w.is_running = is_running;
+                        if is_running {
+                            w.button.set_label(&format!("Stop {}", module));
+                            w.label.set_label("Waiting data...");
+                        } else {
+                            w.button.set_label(&format!("Start {}", module));
+                            w.label.set_label(&format!("{}: Off", module));
+                        }
                     }
                 }
                 IpcMessage::PublishUpdate { module, data } => {
-                    if let Some(m) = self.modules.iter_mut().find(|m| m.config.id == module) {
-                        m.data = data;
+                    if let Some(w) = map.get_mut(&module) {
+                        if w.is_running {
+                            w.label.set_label(&data);
+                        }
                     }
                 }
                 _ => {}
             }
         }
+    });
 
-        // Рисуем панель, прижатую к верхнему краю экрана
-        egui::TopBottomPanel::top("de_panel")
-            .resizable(false)
-            .min_height(45.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 20.0;
-
-                    // Наш логотип и название окружения
-                    ui.heading("🌌 MyDE");
-
-                    // Отображение данных модулей в левой части панели
-                    for module in &self.modules {
-                        ui.separator();
-                        if module.is_running {
-                            ui.label(
-                                egui::RichText::new(&module.data)
-                                    .strong()
-                                    .color(egui::Color32::LIGHT_BLUE),
-                            );
-                        } else {
-                            ui.label(format!("{}: Off", module.config.name));
-                        }
-                    }
-
-                     ui.separator();
-
-                    // Кнопки управления процессами у правого края экрана
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        for module in &self.modules {
-                            let button_text = if module.is_running {
-                                format!("Stop {}", module.config.id)
-                            } else {
-                                format!("Start {}", module.config.id)
-                            };
-
-                            if ui.button(button_text).clicked() {
-                                let action = if module.is_running {
-                                    ProcessAction::Stop
-                                } else {
-                                    ProcessAction::Start
-                                };
-                                let _ = self.ipc_tx.send(IpcMessage::ControlModule {
-                                    module: module.config.id.clone(),
-                                    action,
-                                });
-                            }
-                        }
-                    });
-                });
-            });
-    }
-}
-
-fn main() -> Result<(), eframe::Error> {
-    // Настраиваем eframe так, чтобы окно вело себя как панель: без рамок, фиксированного размера
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1024.0, 45.0])
-            .with_decorations(false) // <--- Убираем рамки (декорации окна)
-            .with_resizable(false),  // <--- Запрещаем менять размер
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "MyDE Panel",
-        options,
-        Box::new(|cc| Box::new(PanelApp::new(cc))),
-    )
+    window.present();
 }

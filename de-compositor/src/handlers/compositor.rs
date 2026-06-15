@@ -1,27 +1,24 @@
+use crate::state::{ClientState, Smallvil};
 use smithay::{
+    input::{pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
     reexports::wayland_server::{
-        protocol::{wl_surface::WlSurface, wl_buffer::WlBuffer},
+        protocol::{wl_buffer::WlBuffer, wl_surface::WlSurface},
         Client,
     },
     wayland::{
         buffer::BufferHandler,
-        compositor::{CompositorHandler, CompositorState, CompositorClientState},
-        shm::{ShmHandler, ShmState},
+        compositor::{CompositorClientState, CompositorHandler, CompositorState},
         output::OutputHandler, // <--- Добавили импорт
+        shm::{ShmHandler, ShmState},
     },
-    input::{SeatHandler, Seat, SeatState, pointer::CursorImageStatus},
 };
-use crate::state::{Smallvil, ClientState};
 
 impl CompositorHandler for Smallvil {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.compositor_state
     }
 
-    fn client_compositor_state<'a>(
-        &self,
-        client: &'a Client,
-    ) -> &'a CompositorClientState {
+    fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
         &client.get_data::<ClientState>().unwrap().compositor_state
     }
 

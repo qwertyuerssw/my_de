@@ -1,5 +1,5 @@
-use de_sdk::{ModuleClient, ModuleEvent};
 use de_ipc::ProcessAction;
+use de_sdk::{ModuleClient, ModuleEvent};
 use std::time::Duration;
 use sysinfo::System;
 
@@ -22,12 +22,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             sys.refresh_memory();
 
             let cpu_usage = sys.global_cpu_info().cpu_usage();
-            
-            // Переводим килобайты в мегабайты (1024 * 1024 = 1_048_576 байт)
+
+             // Переводим байты в мегабайты (1024 * 1024 = 1_048_576 байт)
             let total_mem = sys.total_memory() / 1_048_576;
             let used_mem = sys.used_memory() / 1_048_576;
 
-            let formatted_data = format!("📊 CPU: {:.1}% | MEM: {}/{} MB", cpu_usage, used_mem, total_mem);
+            let formatted_data = format!(
+                "📊 CPU: {:.1}% | MEM: {}/{} MB",
+                cpu_usage, used_mem, total_mem
+            );
 
             if let Err(e) = handle_clone.publish_update(formatted_data) {
                 eprintln!("[SysInfo] Failed to send update: {:?}", e);
@@ -51,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             ModuleEvent::RefreshRequest => {
                 println!("[SysInfo] Refresh requested by composer/panel.");
-                // Поскольку опрос ресурсов происходит часто (раз в 2 сек), 
+                // Поскольку опрос ресурсов происходит часто (раз в 2 сек),
                 // принудительное мгновенное обновление обычно избыточно,
                 // но при необходимости сюда можно вынести общий метод обновления данных.
             }

@@ -1,8 +1,10 @@
+use crate::state::Smallvil;
 use smithay::{
     desktop::Window,
-    wayland::shell::xdg::{XdgShellHandler, XdgShellState, ToplevelSurface, PopupSurface, PositionerState},
+    wayland::shell::xdg::{
+        PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    },
 };
-use crate::state::Smallvil;
 
 impl XdgShellHandler for Smallvil {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {

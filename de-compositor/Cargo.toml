@@ -13,7 +13,6 @@ smithay = { version = "0.7.0", features = [
     "backend_udev", 
     "renderer_gl",      
     "desktop", 
-    "input", 
     "wayland_frontend"  
 ] }
 

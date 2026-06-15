@@ -1,9 +1,9 @@
+use de_ipc::{ClientType, IpcMessage, ProcessAction};
+use futures_util::{SinkExt, StreamExt};
 use std::path::PathBuf;
 use thiserror::Error;
-use de_ipc::{IpcMessage, ProcessAction, ClientType};
 use tokio::net::UnixStream;
 use tokio_util::codec::{Framed, LinesCodec};
-use futures_util::{SinkExt, StreamExt};
 
 /// Ошибки, которые могут возникнуть при работе с SDK.
 #[derive(Debug, Error)]
@@ -40,16 +40,13 @@ pub struct ModuleHandle {
 
 impl ModuleHandle {
     /// Отправляет новое строковое состояние виджета на панель.
-    /// Метод неблокирующий и очень быстрый. Если связь временно разорвана,
-    /// сообщения будут буферизоваться в канале до момента переподключения сокета.
     pub fn publish_update(&self, data: impl Into<String>) -> Result<(), SdkError> {
         let message = IpcMessage::PublishUpdate {
             module: self.module_id.clone(),
             data: data.into(),
         };
-        
-        self.tx.send(message)
-            .map_err(|_| SdkError::ConnectionLost)
+
+        self.tx.send(message).map_err(|_| SdkError::ConnectionLost)
     }
 }
 
@@ -82,15 +79,19 @@ impl ModuleClient {
     /// фоновую задачу автоматического переподключения.
     pub async fn start(
         self,
-    ) -> Result<(ModuleHandle, tokio::sync::mpsc::UnboundedReceiver<ModuleEvent>), SdkError> {
-        // Создаем каналы связи
+    ) -> Result<
+        (
+            ModuleHandle,
+            tokio::sync::mpsc::UnboundedReceiver<ModuleEvent>,
+        ),
+        SdkError,
+    > {
         let (tx_outgoing, rx_outgoing) = tokio::sync::mpsc::unbounded_channel::<IpcMessage>();
         let (tx_incoming, rx_incoming) = tokio::sync::mpsc::unbounded_channel::<ModuleEvent>();
 
         let module_id = self.module_id.clone();
         let socket_path = self.socket_path.clone();
 
-        // Запускаем единую отказоустойчивую задачу в фоне
         tokio::spawn(async move {
             run_reconnecting_loop(module_id, socket_path, rx_outgoing, tx_incoming).await;
         });
@@ -112,7 +113,11 @@ async fn run_reconnecting_loop(
     tx_incoming: tokio::sync::mpsc::UnboundedSender<ModuleEvent>,
 ) {
     loop {
-        log::info!("[SDK] [{}] Connecting to IPC socket at {:?}", module_id, socket_path);
+        log::info!(
+            "[SDK] [{}] Connecting to IPC socket at {:?}",
+            module_id,
+            socket_path
+        );
 
         let stream = match UnixStream::connect(&socket_path).await {
             Ok(s) => s,
@@ -137,23 +142,33 @@ async fn run_reconnecting_loop(
         match serde_json::to_string(&reg_msg) {
             Ok(reg_str) => {
                 if let Err(err) = writer.send(reg_str).await {
-                    log::error!("[SDK] [{}] Registration handshake failed: {:?}", module_id, err);
+                    log::error!(
+                        "[SDK] [{}] Registration handshake failed: {:?}",
+                        module_id,
+                        err
+                    );
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     continue;
                 }
             }
             Err(err) => {
-                log::error!("[SDK] [{}] Handshake serialization error: {:?}", module_id, err);
+                log::error!(
+                    "[SDK] [{}] Handshake serialization error: {:?}",
+                    module_id,
+                    err
+                );
                 return; // Критическая ошибка конфигурации, завершаем поток
             }
         }
 
-        log::info!("[SDK] [{}] Connected and registered successfully.", module_id);
+        log::info!(
+            "[SDK] [{}] Connected and registered successfully.",
+            module_id
+        );
 
-        // Главный цикл обработки ввода-вывода текущего соединения
         loop {
             tokio::select! {
-                // Сценарий А: Получили сообщение из сокета от менеджера/панели
+                // Получили сообщение из сокета от менеджера/панели
                 line_opt = reader.next() => {
                     match line_opt {
                         Some(Ok(line)) => {
@@ -164,7 +179,14 @@ async fn run_reconnecting_loop(
                                             let event = ModuleEvent::Action(action);
                                             if tx_incoming.send(event).is_err() {
                                                 log::info!("[SDK] [{}] Module receiver dropped. Terminating SDK task.", module_id);
-                                                return; // Модуль завершил работу, останавливаем SDK
+                                                return;
+                                            }
+                                        }
+                                        IpcMessage::Refresh => {
+                                            let event = ModuleEvent::RefreshRequest;
+                                            if tx_incoming.send(event).is_err() {
+                                                log::info!("[SDK] [{}] Module receiver dropped. Terminating SDK task.", module_id);
+                                                return;
                                             }
                                         }
                                         _ => {}
@@ -182,16 +204,16 @@ async fn run_reconnecting_loop(
                         }
                         Some(Err(err)) => {
                             log::error!("[SDK] [{}] IPC read error: {:?}", module_id, err);
-                            break; // Выходим во внешний цикл для переподключения
+                            break;
                         }
                         None => {
                             log::warn!("[SDK] [{}] IPC socket closed by remote host.", module_id);
-                            break; // Выходим во внешний цикл для переподключения
+                            break;
                         }
                     }
                 }
 
-                // Сценарий Б: Модуль прислал обновление для отправки на панель
+                // Модуль прислал обновление для отправки на панель
                 msg_opt = rx_outgoing.recv() => {
                     match msg_opt {
                         Some(msg) => {
@@ -199,7 +221,7 @@ async fn run_reconnecting_loop(
                                 Ok(serialized_msg) => {
                                     if let Err(err) = writer.send(serialized_msg).await {
                                         log::error!("[SDK] [{}] IPC write error: {:?}", module_id, err);
-                                        break; // Выходим во внешний цикл для переподключения
+                                        break;
                                     }
                                 }
                                 Err(err) => {
@@ -209,14 +231,17 @@ async fn run_reconnecting_loop(
                         }
                         None => {
                             log::info!("[SDK] [{}] All module handles dropped. Terminating SDK task.", module_id);
-                            return; // Все отправители удалены, закрываем задачу
+                            return;
                         }
                     }
                 }
             }
         }
 
-        log::warn!("[SDK] [{}] Connection broken. Reconnecting in 2 seconds...", module_id);
+        log::warn!(
+            "[SDK] [{}] Connection broken. Reconnecting in 2 seconds...",
+            module_id
+        );
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
 }
