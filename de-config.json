@@ -7,6 +7,10 @@
     {
       "id": "SysInfo",
       "path": "./target/debug/mod-sysinfo"
+    },
+    {
+      "id": "Volume",
+      "path": "./target/debug/mod-volume"
     }
   ]
 }

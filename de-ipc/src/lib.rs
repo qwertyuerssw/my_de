@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum ModuleId {
     Clock,
     SysInfo,
+    Volume,
 }
 
 /// Команды управления жизненным циклом процессов, которые панель шлет менеджеру

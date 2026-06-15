@@ -57,6 +57,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
+    state.modules.insert(
+    ModuleId::Volume,
+    ModuleProcess {
+        id: ModuleId::Volume,
+        path: "./target/debug/mod-volume",
+        child: None,
+        enabled: false,
+    },
+);
+
     let (tx, rx): (mpsc::Sender<IpcMessage>, Receiver<IpcMessage>) = mpsc::channel();
     
     let read_socket = state.socket.try_clone()?;

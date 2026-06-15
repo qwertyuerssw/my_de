@@ -15,6 +15,9 @@ struct PanelApp {
     // Последние данные, присланные модулями
     clock_data: String,
     sysinfo_data: String,
+
+    volume_running: bool,
+    volume_data: String,
 }
 
 impl PanelApp {
@@ -76,8 +79,10 @@ impl PanelApp {
             ipc_rx: rx,
             clock_running: false,
             sysinfo_running: false,
+            volume_running: false,
             clock_data: "Waiting clock data...".to_string(),
             sysinfo_data: "Waiting sysinfo data...".to_string(),
+            volume_data: "Waiting volume data...".to_string(),
         }
     }
 }
@@ -91,12 +96,14 @@ impl eframe::App for PanelApp {
                     match module {
                         ModuleId::Clock => self.clock_running = is_running,
                         ModuleId::SysInfo => self.sysinfo_running = is_running,
+                        ModuleId::Volume => self.volume_running = is_running,
                     }
                 }
                 IpcMessage::PublishUpdate { module, data } => {
                     match module {
                         ModuleId::Clock => self.clock_data = data,
                         ModuleId::SysInfo => self.sysinfo_data = data,
+                        ModuleId::Volume => self.volume_data = data,
                     }
                 }
                 _ => {}
@@ -138,6 +145,25 @@ impl eframe::App for PanelApp {
                         );
                     } else {
                         ui.label("📊 SysInfo: Off");
+                    }
+
+                    // Отрисовка виджета громкости
+                    if self.volume_running {
+                        ui.label(egui::RichText::new(&self.volume_data).strong().color(egui::Color32::GOLD));
+                    } else {
+                        ui.label("🔊 Vol: Off");
+                    }
+                    
+                    ui.separator();
+
+                    // И кнопку в правую часть:
+                    let volume_text = if self.volume_running { "Stop Vol" } else { "Start Vol" };
+                    if ui.button(volume_text).clicked() {
+                        let action = if self.volume_running { ProcessAction::Stop } else { ProcessAction::Start };
+                        let _ = self.ipc_tx.send(IpcMessage::ControlModule {
+                            module: ModuleId::Volume,
+                            action,
+                        });
                     }
 
                     // Отрисовка кнопок управления процессами у правого края

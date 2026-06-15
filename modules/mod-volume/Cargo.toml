@@ -1,0 +1,11 @@
+[package]
+name = "mod-volume"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+de-ipc = { path = "../../de-ipc" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# По желанию можно добавить крейт для работы с аудио, например, rodio или cpall,
+# но для начала можно просто симулировать чтение громкости.
