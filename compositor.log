@@ -1,1 +1,0 @@
-[2m2026-06-15T03:29:46.779725Z[0m [31mERROR[0m [2mde_compositor::ipc[0m[2m:[0m Error reading from client 5: Os { code: 104, kind: ConnectionReset, message: "Connection reset by peer" }
