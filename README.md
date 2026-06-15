@@ -41,8 +41,11 @@
 * Виджеты системных модулей (часы, индикаторы загрузки, сеть, уровень заряда).
 * Данные, динамически получаемые от модулей через шину `de-ipc`.
 
-### 5. `modules/` (Расширения системы)
-Каталог вспомогательных независимых микропрограмм (модулей). Каждый модуль решает строго одну задачу (например, опрос системного времени или сбор статистики CPU) и транслирует данные в шину IPC для последующего отображения на панели.
+### 5. `de-sdk` (Инструментарий разработчика)
+Библиотека-SDK для быстрого создания новых модулей. Абстрагирует низкоуровневую асинхронную работу с сокетами, автоматически обрабатывает переподключение к шине при сбоях и предоставляет готовые каналы для приема системных событий от панели или менеджера.
+
+### 6. `modules/` (Расширения системы)
+Каталог вспомогательных независимых микропрограмм (модулей). Каждый модуль решает строго одну задачу (например, опрос системного времени) и транслирует данные через `de-sdk` в шину IPC для последующего отображения на панели.
 
 ---
 
@@ -90,7 +93,8 @@ cargo build --release
 
 Инструкция по интеграции нового модуля (на примере модуля звука)
 
-Процесс расширения возможностей панели состоит из 5 последовательных шагов.
+Процесс создания и интеграции нового модуля состоит из 5 последовательных шагов.
+Благодаря использованию de-sdk, разработка стала декларативной и безопасной.
 
 Шаг 1: Расширение протокола в de-ipc
 
@@ -115,6 +119,7 @@ pub enum ModuleId {
         "de-ipc",
         "de-manager",
         "de-panel",
+        "de-sdk",
         "modules/mod-clock",
         "modules/mod-sysinfo",
         "modules/mod-volume"  # <-- Добавьте путь к новому крейту
@@ -124,7 +129,8 @@ pub enum ModuleId {
 
     mkdir -p modules/mod-volume/src
 
-3.  Опишите манифест зависимости в modules/mod-volume/Cargo.toml:
+3.  Опишите манифест зависимостей в modules/mod-volume/Cargo.toml. Нам
+    понадобится только de-sdk для работы и асинхронный рантайм tokio:
 
     [package]
     name = "mod-volume"
@@ -133,48 +139,58 @@ pub enum ModuleId {
 
     [dependencies]
     de-ipc = { path = "../../de-ipc" }
-    serde = { version = "1.0", features = ["derive"] }
-    serde_json = "1.0"
+    de-sdk = { path = "../../de-sdk" }
+    tokio = { version = "1", features = ["full"] }
 
-4.  Реализуйте логику модуля в modules/mod-volume/src/main.rs:
+4.  Реализуйте логику модуля в modules/mod-volume/src/main.rs. Работа с сокетами
+    и переподключением теперь полностью скрыта в SDK:
 
-    use std::io::Write;
-    use std::os::unix::net::UnixStream;
-    use std::thread;
+    use de_sdk::{ModuleClient, ModuleEvent};
+    use de_ipc::ProcessAction;
     use std::time::Duration;
-    use de_ipc::{IpcMessage, ClientType, ModuleId};
 
-    fn main() -> Result<(), Box<dyn std::error::Error>> {
-        let socket_path = "/tmp/my-de-ipc.sock";
-        let mut socket = UnixStream::connect(socket_path)?;
+    #[tokio::main]
+    async fn main() -> Result<(), Box<dyn std::error::Error>> {
+        println!("[Volume] Starting volume module...");
 
-        // Регистрация в IPC-сервере в качестве модуля громкости
-        let reg_msg = IpcMessage::Register {
-            client_type: ClientType::Module(ModuleId::Volume),
-        };
-        send_ipc(&mut socket, &reg_msg)?;
+        // Инициализация и запуск отказоустойчивого клиента из SDK
+        let client = ModuleClient::new("volume");
+        let (handle, mut rx_events) = client.start().await?;
 
-        let mut mock_volume = 50; // Симуляция значения громкости
+        // Фоновая задача обновления состояния
+        let handle_clone = handle.clone();
+        tokio::spawn(async move {
+            let mut mock_volume = 50; // Симуляция значения громкости
+            loop {
+                let formatted_data = format!("🔊 Vol: {}%", mock_volume);
 
-        loop {
-            let formatted_data = format!("🔊 Vol: {}%", mock_volume);
+                if let Err(e) = handle_clone.publish_update(formatted_data) {
+                    eprintln!("[Volume] Failed to send update: {:?}", e);
+                }
 
-            let update_msg = IpcMessage::PublishUpdate {
-                module: ModuleId::Volume,
-                data: formatted_data,
-            };
-            send_ipc(&mut socket, &update_msg)?;
+                mock_volume = (mock_volume + 5) % 100;
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        });
 
-            mock_volume = (mock_volume + 5) % 105;
-            thread::sleep(Duration::from_secs(3));
+        // Реактивный цикл обработки системных событий от de-manager/панели
+        while let Some(event) = rx_events.recv().await {
+            match event {
+                ModuleEvent::Action(ProcessAction::Stop) => {
+                    println!("[Volume] Received Stop command. Exiting gracefully...");
+                    break; // Мягко завершаем программу
+                }
+                ModuleEvent::Action(ProcessAction::Restart) => {
+                    println!("[Volume] Received Restart command. Reinitializing...");
+                }
+                ModuleEvent::RefreshRequest => {
+                    println!("[Volume] Refresh requested by composer/panel.");
+                }
+                _ => {}
+            }
         }
-    }
 
-    fn send_ipc(socket: &mut UnixStream, msg: &IpcMessage) -> Result<(), Box<dyn std::error::Error>> {
-        let mut serialized = serde_json::to_string(msg)?;
-        serialized.push('\n');
-        socket.write_all(serialized.as_bytes())?;
-        socket.flush()?;
+        println!("[Volume] Stopped.");
         Ok(())
     }
 
@@ -206,13 +222,13 @@ pub enum ModuleId {
 Шаг 4: Обновление интерфейса панели (de-panel)
 
 Обучите панель принимать и отображать новые данные. В файле обработки событий
-de-panel добавьте реакцию на сообщения от ModuleId::Volume:
+de-panel добавьте реакцию на сообщения от "volume":
 
 // Пример обработки входящих IPC-сообщений в цикле рендеринга панели
 match msg {
     IpcMessage::PublishUpdate { module, data } => {
-        match module {
-            ModuleId::Volume => {
+        match module.as_str() {
+            "volume" => {
                 // Обновление состояния виджета громкости в UI панели
                 panel_state.volume_text = data;
             }

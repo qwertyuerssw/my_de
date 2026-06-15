@@ -1,40 +1,52 @@
-use std::io::Write;
-use std::os::unix::net::UnixStream;
-use std::thread;
+use de_sdk::{ModuleClient, ModuleEvent};
+use de_ipc::ProcessAction;
 use std::time::Duration;
-use de_ipc::{IpcMessage, ClientType}; // Убрали импорт ModuleId
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let socket_path = "/tmp/my-de-ipc.sock";
-    let mut socket = UnixStream::connect(socket_path)?;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("[Volume] Starting volume module with de-sdk...");
 
-    // Регистрируемся в IPC
-    let reg_msg = IpcMessage::Register {
-        client_type: ClientType::Module("volume".to_string()),
-    };
-    send_ipc(&mut socket, &reg_msg)?;
+    // 1. Инициализируем и запускаем клиент модуля через SDK
+    let client = ModuleClient::new("volume");
+    let (handle, mut rx_events) = client.start().await?;
 
-    let mut mock_volume = 50; // Симуляция уровня громкости
-    loop {
-        let formatted_data = format!("🔊 Vol: {}%", mock_volume);
+    println!("[Volume] Connected to SDK background engine.");
 
-        let update_msg = IpcMessage::PublishUpdate {
-            module: "volume".to_string(), // Используем строковый ID "volume"
-            data: formatted_data,
-        };
+    // 2. Фоновая задача для периодического обновления громкости
+    let handle_clone = handle.clone();
+    tokio::spawn(async move {
+        let mut mock_volume = 50; // Симуляция уровня громкости
+        loop {
+            let formatted_data = format!("🔊 Vol: {}%", mock_volume);
 
-        send_ipc(&mut socket, &update_msg)?;
+            if let Err(e) = handle_clone.publish_update(formatted_data) {
+                eprintln!("[Volume] Failed to send update: {:?}", e);
+            }
 
-        mock_volume = (mock_volume + 5) % 100;
+            mock_volume = (mock_volume + 5) % 100;
 
-        thread::sleep(Duration::from_secs(3));
+            // Неблокирующий сон в асинхронном контексте
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    });
+
+    // 3. Реактивный цикл обработки системных событий
+    while let Some(event) = rx_events.recv().await {
+        match event {
+            ModuleEvent::Action(ProcessAction::Stop) => {
+                println!("[Volume] Received Stop command. Exiting gracefully...");
+                break;
+            }
+            ModuleEvent::Action(ProcessAction::Restart) => {
+                println!("[Volume] Received Restart command. Reinitializing...");
+            }
+            ModuleEvent::RefreshRequest => {
+                println!("[Volume] Refresh requested by composer/panel.");
+            }
+            _ => {}
+        }
     }
-}
 
-fn send_ipc(socket: &mut UnixStream, msg: &IpcMessage) -> Result<(), Box<dyn std::error::Error>> {
-    let mut serialized = serde_json::to_string(msg)?;
-    serialized.push('\n');
-    socket.write_all(serialized.as_bytes())?;
-    socket.flush()?;
+    println!("[Volume] Stopped.");
     Ok(())
 }

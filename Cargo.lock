@@ -2392,9 +2392,9 @@ name = "mod-sysinfo"
 version = "0.1.0"
 dependencies = [
  "de-ipc",
- "serde",
- "serde_json",
+ "de-sdk",
  "sysinfo",
+ "tokio",
 ]
 
 [[package]]
@@ -2402,8 +2402,8 @@ name = "mod-volume"
 version = "0.1.0"
 dependencies = [
  "de-ipc",
- "serde",
- "serde_json",
+ "de-sdk",
+ "tokio",
 ]
 
 [[package]]
