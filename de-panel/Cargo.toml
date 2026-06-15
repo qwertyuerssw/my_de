@@ -1,0 +1,15 @@
+[package]
+name = "de-panel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Наша библиотека IPC
+de-ipc = { path = "../de-ipc" }
+
+# Сериализация
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Легковесный графический движок на чистом Rust
+eframe = "0.26"

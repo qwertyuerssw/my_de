@@ -1,0 +1,12 @@
+{
+  "modules": [
+    {
+      "id": "Clock",
+      "path": "./target/debug/mod-clock"
+    },
+    {
+      "id": "SysInfo",
+      "path": "./target/debug/mod-sysinfo"
+    }
+  ]
+}

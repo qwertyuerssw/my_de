@@ -1,0 +1,15 @@
+[package]
+name = "mod-sysinfo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Наш IPC-протокол
+de-ipc = { path = "../../de-ipc" }
+
+# Сериализация
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Системный монитор
+sysinfo = "0.30"

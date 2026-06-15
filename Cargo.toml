@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "de-compositor",
+    "de-ipc",
+    "de-manager",
+    "de-panel",
+    "modules/mod-clock",
+    "modules/mod-sysinfo"
+]
