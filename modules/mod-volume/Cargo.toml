@@ -1,9 +1,0 @@
-[package]
-name = "mod-volume"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-de-ipc = { path = "../../de-ipc" }
-de-sdk = { path = "../../de-sdk" }
-tokio = { version = "1", features = ["full"] }

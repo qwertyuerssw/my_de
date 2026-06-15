@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-de-ipc = { path = "../../de-ipc" }
-de-sdk = { path = "../../de-sdk" }
+de-ipc = { path = "/home/qwe/my_de/de-ipc" }
+de-sdk = { path = "/home/qwe/my_de/de-sdk" }
 tokio = { version = "1", features = ["full"] }
 sysinfo = "0.30"

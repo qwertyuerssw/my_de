@@ -3,7 +3,8 @@ use futures_util::{SinkExt, StreamExt};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::net::UnixStream;
-use tokio_util::codec::{Framed, LinesCodec};
+// 1. ИМПОРТ: Меняем Framed на FramedRead и FramedWrite
+use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 
 /// Ошибки, которые могут возникнуть при работе с SDK.
 #[derive(Debug, Error)]
@@ -132,7 +133,10 @@ async fn run_reconnecting_loop(
             }
         };
 
-        let (mut writer, mut reader) = Framed::new(stream, LinesCodec::new()).split();
+        // 2. ИСПРАВЛЕНИЕ: Разбиваем сам сокет, а затем оборачиваем половины
+        let (read_half, write_half) = stream.into_split();
+        let mut reader = FramedRead::new(read_half, LinesCodec::new());
+        let mut writer = FramedWrite::new(write_half, LinesCodec::new());
 
         // Проводим рукопожатие (регистрацию)
         let reg_msg = IpcMessage::Register {
