@@ -128,9 +128,12 @@ impl Smallvil {
         tracing::info!("Received IPC message from client {}: {:?}", client_id, msg);
         match msg {
             IpcMessage::Register { client_type } => {
+                // Сначала выводим лог, пока мы владеем переменной client_type
+                tracing::info!("Client {} successfully registered as {:?}", client_id, client_type);
+                
+                // Теперь перемещаем право владения в session
                 if let Some(session) = self.ipc_clients.get_mut(&client_id) {
                     session.client_type = Some(client_type);
-                    tracing::info!("Client {} successfully registered as {:?}", client_id, client_type);
                 }
             }
             IpcMessage::PublishUpdate { module, data } => {
@@ -144,6 +147,10 @@ impl Smallvil {
             }
             IpcMessage::QueryStatus => {
                 self.send_to_manager(IpcMessage::QueryStatus);
+            }
+            // Пересылаем полученный от de-manager список конфигураций на панель
+            IpcMessage::ModulesList { modules } => {
+                self.broadcast_message(IpcMessage::ModulesList { modules });
             }
         }
     }

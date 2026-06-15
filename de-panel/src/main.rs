@@ -1,23 +1,22 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use eframe::egui;
-use de_ipc::{IpcMessage, ModuleId, ProcessAction};
+use de_ipc::{IpcMessage, ModuleConfig, ProcessAction};
+
+/// Вспомогательная структура для отслеживания состояния конкретного модуля на панели
+struct ModuleState {
+    config: ModuleConfig,
+    is_running: bool,
+    data: String,
+}
 
 struct PanelApp {
     // Каналы для безопасного общения потока GUI с сетевыми потоками
     ipc_tx: std::sync::mpsc::Sender<IpcMessage>,
     ipc_rx: std::sync::mpsc::Receiver<IpcMessage>,
     
-    // Текущие статусы запущенности процессов
-    clock_running: bool,
-    sysinfo_running: bool,
-    
-    // Последние данные, присланные модулями
-    clock_data: String,
-    sysinfo_data: String,
-
-    volume_running: bool,
-    volume_data: String,
+    // Динамический список всех загруженных модулей
+    modules: Vec<ModuleState>,
 }
 
 impl PanelApp {
@@ -71,18 +70,13 @@ impl PanelApp {
             }
         });
         
-        // Сразу после подключения запрашиваем статус всех процессов у de-manager
+        // Сразу после подключения запрашиваем список модулей и их статусы у de-manager
         let _ = gui_tx.send(IpcMessage::QueryStatus);
 
         Self {
             ipc_tx: gui_tx,
             ipc_rx: rx,
-            clock_running: false,
-            sysinfo_running: false,
-            volume_running: false,
-            clock_data: "Waiting clock data...".to_string(),
-            sysinfo_data: "Waiting sysinfo data...".to_string(),
-            volume_data: "Waiting volume data...".to_string(),
+            modules: Vec::new(),
         }
     }
 }
@@ -92,18 +86,25 @@ impl eframe::App for PanelApp {
         // Вычитываем все накопившиеся сетевые сообщения
         while let Ok(msg) = self.ipc_rx.try_recv() {
             match msg {
+                IpcMessage::ModulesList { modules } => {
+                    // Инициализируем наш динамический список модулей при первом запросе
+                    self.modules = modules
+                        .into_iter()
+                        .map(|config| ModuleState {
+                            config,
+                            is_running: false,
+                            data: "Waiting data...".to_string(),
+                        })
+                        .collect();
+                }
                 IpcMessage::ModuleStatus { module, is_running } => {
-                    match module {
-                        ModuleId::Clock => self.clock_running = is_running,
-                        ModuleId::SysInfo => self.sysinfo_running = is_running,
-                        ModuleId::Volume => self.volume_running = is_running,
+                    if let Some(m) = self.modules.iter_mut().find(|m| m.config.id == module) {
+                        m.is_running = is_running;
                     }
                 }
                 IpcMessage::PublishUpdate { module, data } => {
-                    match module {
-                        ModuleId::Clock => self.clock_data = data,
-                        ModuleId::SysInfo => self.sysinfo_data = data,
-                        ModuleId::Volume => self.volume_data = data,
+                    if let Some(m) = self.modules.iter_mut().find(|m| m.config.id == module) {
+                        m.data = data;
                     }
                 }
                 _ => {}
@@ -121,72 +122,42 @@ impl eframe::App for PanelApp {
                     // Наш логотип и название окружения
                     ui.heading("🌌 MyDE");
 
-                    ui.separator();
-
-                    // Отображение данных модуля Часов
-                    if self.clock_running {
-                        ui.label(
-                            egui::RichText::new(&self.clock_data)
-                                .strong()
-                                .color(egui::Color32::LIGHT_BLUE),
-                        );
-                    } else {
-                        ui.label("🕒 Clock: Off");
-                    }
-
-                    ui.separator();
-
-                    // Отображение данных модуля системных ресурсов
-                    if self.sysinfo_running {
-                        ui.label(
-                            egui::RichText::new(&self.sysinfo_data)
-                                .strong()
-                                .color(egui::Color32::LIGHT_GREEN),
-                        );
-                    } else {
-                        ui.label("📊 SysInfo: Off");
-                    }
-
-                    // Отрисовка виджета громкости
-                    if self.volume_running {
-                        ui.label(egui::RichText::new(&self.volume_data).strong().color(egui::Color32::GOLD));
-                    } else {
-                        ui.label("🔊 Vol: Off");
-                    }
-                    
-                    ui.separator();
-
-                    // И кнопку в правую часть:
-                    let volume_text = if self.volume_running { "Stop Vol" } else { "Start Vol" };
-                    if ui.button(volume_text).clicked() {
-                        let action = if self.volume_running { ProcessAction::Stop } else { ProcessAction::Start };
-                        let _ = self.ipc_tx.send(IpcMessage::ControlModule {
-                            module: ModuleId::Volume,
-                            action,
-                        });
-                    }
-
-                    // Отрисовка кнопок управления процессами у правого края
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        
-                        // Переключатель модуля системной информации
-                        let sysinfo_text = if self.sysinfo_running { "Stop SysInfo" } else { "Start SysInfo" };
-                        if ui.button(sysinfo_text).clicked() {
-                            let action = if self.sysinfo_running { ProcessAction::Stop } else { ProcessAction::Start };
-                            let _ = self.ipc_tx.send(IpcMessage::ControlModule {
-                                module: ModuleId::SysInfo,
-                                action,
-                            });
+                    // Отображение данных модулей в левой части панели
+                    for module in &self.modules {
+                        ui.separator();
+                        if module.is_running {
+                            ui.label(
+                                egui::RichText::new(&module.data)
+                                    .strong()
+                                    .color(egui::Color32::LIGHT_BLUE),
+                            );
+                        } else {
+                            ui.label(format!("{}: Off", module.config.name));
                         }
+                    }
 
-                        // Переключатель модуля часов
-                        let clock_text = if self.clock_running { "Stop Clock" } else { "Start Clock" };
-                        if ui.button(clock_text).clicked() {
-                            let action = if self.clock_running { ProcessAction::Stop } else { ProcessAction::Start };
-                            let _ = self.ipc_tx.send(IpcMessage::ControlModule {
-                                module: ModuleId::Clock,
-                                action,
-                            });
+                     ui.separator();
+
+                    // Кнопки управления процессами у правого края экрана
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        for module in &self.modules {
+                            let button_text = if module.is_running {
+                                format!("Stop {}", module.config.id)
+                            } else {
+                                format!("Start {}", module.config.id)
+                            };
+
+                            if ui.button(button_text).clicked() {
+                                let action = if module.is_running {
+                                    ProcessAction::Stop
+                                } else {
+                                    ProcessAction::Start
+                                };
+                                let _ = self.ipc_tx.send(IpcMessage::ControlModule {
+                                    module: module.config.id.clone(),
+                                    action,
+                                });
+                            }
                         }
                     });
                 });

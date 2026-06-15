@@ -1,16 +1,30 @@
-{
-  "modules": [
-    {
-      "id": "Clock",
-      "path": "./target/debug/mod-clock"
-    },
-    {
-      "id": "SysInfo",
-      "path": "./target/debug/mod-sysinfo"
-    },
-    {
-      "id": "Volume",
-      "path": "./target/debug/mod-volume"
-    }
-  ]
-}
+[
+  {
+    "id": "clock",
+    "name": "🕒 Clock",
+    "path": "./target/debug/mod-clock",
+    "args": [],
+    "autostart": true
+  },
+  {
+    "id": "sysinfo",
+    "name": "📊 SysInfo",
+    "path": "./target/debug/mod-sysinfo",
+    "args": [],
+    "autostart": true
+  },
+  {
+    "id": "volume",
+    "name": "🔊 Volume",
+    "path": "./target/debug/mod-volume",
+    "args": [],
+    "autostart": false
+  },
+  {
+    "id": "test_sleep",
+    "name": "💤 TestSleep",
+    "path": "/bin/sleep",
+    "args": ["3600"],
+    "autostart": false
+  }
+]

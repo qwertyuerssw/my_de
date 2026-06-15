@@ -3,10 +3,8 @@ use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::Duration;
 
-// В версии 0.30 типажи SystemExt и CpuExt были полностью удалены!
-// Достаточно импортировать только саму структуру System.
 use sysinfo::System;
-use de_ipc::{IpcMessage, ClientType, ModuleId};
+use de_ipc::{IpcMessage, ClientType}; // Убрали импорт ModuleId
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[SysInfo] Starting sysinfo module...");
@@ -17,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Регистрируемся в композиторе как модуль системной информации
     let reg_msg = IpcMessage::Register {
-        client_type: ClientType::Module(ModuleId::SysInfo),
+        client_type: ClientType::Module("sysinfo".to_string()),
     };
     send_ipc(&mut socket, &reg_msg)?;
 
@@ -25,21 +23,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Отправляем утилизацию ресурсов каждые 2 секунды
     loop {
-        // Обновляем информацию о процессоре и памяти (прямые методы структуры в 0.30)
         sys.refresh_cpu();
         sys.refresh_memory();
 
-        // Получаем общую загрузку CPU в %
         let cpu_usage = sys.global_cpu_info().cpu_usage();
         
-        // Преобразуем объем памяти из байтов в мегабайты (делим на 1024 * 1024)
         let total_mem = sys.total_memory() / 1_048_576;
         let used_mem = sys.used_memory() / 1_048_576;
 
         let formatted_data = format!("📊 CPU: {:.1}% | MEM: {}/{} MB", cpu_usage, used_mem, total_mem);
 
         let update_msg = IpcMessage::PublishUpdate {
-            module: ModuleId::SysInfo,
+            module: "sysinfo".to_string(), // Используем строковый ID "sysinfo"
             data: formatted_data,
         };
 

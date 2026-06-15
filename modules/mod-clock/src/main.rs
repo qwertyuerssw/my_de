@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::Duration;
 use chrono::Local;
-use de_ipc::{IpcMessage, ClientType, ModuleId};
+use de_ipc::{IpcMessage, ClientType}; // Убрали импорт ModuleId
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[Clock] Starting clock module...");
@@ -12,9 +12,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut socket = UnixStream::connect(socket_path)?;
     println!("[Clock] Connected to IPC socket.");
 
-    // 1. Регистрируемся в композиторе как модуль часов
+    // 1. Регистрируемся в композиторе как модуль часов (передаем строковый ID)
     let reg_msg = IpcMessage::Register {
-        client_type: ClientType::Module(ModuleId::Clock),
+        client_type: ClientType::Module("clock".to_string()),
     };
     send_ipc(&mut socket, &reg_msg)?;
 
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let formatted_data = format!("🕒 {}", current_time);
 
         let update_msg = IpcMessage::PublishUpdate {
-            module: ModuleId::Clock,
+            module: "clock".to_string(), // Используем строковый ID "clock"
             data: formatted_data,
         };
 

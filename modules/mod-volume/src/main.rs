@@ -2,7 +2,7 @@ use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::Duration;
-use de_ipc::{IpcMessage, ClientType, ModuleId};
+use de_ipc::{IpcMessage, ClientType}; // Убрали импорт ModuleId
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = "/tmp/my-de-ipc.sock";
@@ -10,23 +10,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Регистрируемся в IPC
     let reg_msg = IpcMessage::Register {
-        client_type: ClientType::Module(ModuleId::Volume),
+        client_type: ClientType::Module("volume".to_string()),
     };
     send_ipc(&mut socket, &reg_msg)?;
 
     let mut mock_volume = 50; // Симуляция уровня громкости
     loop {
-        // Здесь в реальном модуле мог бы быть вызов `amixer` или API ALSA/PulseAudio
         let formatted_data = format!("🔊 Vol: {}%", mock_volume);
 
         let update_msg = IpcMessage::PublishUpdate {
-            module: ModuleId::Volume,
+            module: "volume".to_string(), // Используем строковый ID "volume"
             data: formatted_data,
         };
 
         send_ipc(&mut socket, &update_msg)?;
 
-        // Симулируем колебание громкости для теста
         mock_volume = (mock_volume + 5) % 100;
 
         thread::sleep(Duration::from_secs(3));
